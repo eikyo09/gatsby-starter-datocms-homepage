@@ -8,7 +8,8 @@
     "build": "gatsby build",
     "serve": "gatsby serve",
     "clean": "gatsby clean",
-    "setup": "node ./scripts/setup.js"
+    "setup": "node ./scripts/setup.js",
+    "earnings": "node ./scripts/toggl-earnings.js"
   },
   "dependencies": {
     "datocms-structured-text-to-html-string": "^2.0.0",

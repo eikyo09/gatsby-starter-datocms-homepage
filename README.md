@@ -55,6 +55,33 @@ This will run a script to create `.env.development` and `.env.production` files 
 
 1. **Open the source code and start editing**
 
+## Toggl earnings widget
+
+The `/earnings` page shows how much you have earned so far this month from the hours tracked in [Toggl Track](https://track.toggl.com), including the free plan. It multiplies tracked hours by your hourly rate, splits the total by project, shows a running timer live, and projects where the month will land at the current pace.
+
+1. Copy your API token from Toggl Track → Profile settings → **API Token**.
+1. Add these to `.env.development` (and `.env.production` when deploying):
+
+   ```sh
+   TOGGL_API_TOKEN=your-token
+   TOGGL_HOURLY_RATE=50
+   TOGGL_CURRENCY=USD
+   # optional per-project rates, keyed by project name or id
+   TOGGL_PROJECT_RATES={"Client A": 80, "Client B": 65}
+   ```
+
+1. Run `yarn start` and open <http://localhost:8000/earnings>.
+
+The widget calls a [Gatsby Function](https://www.gatsbyjs.com/docs/reference/functions/) at `src/api/toggl-earnings.js`, so your token stays on the server. Month boundaries use the time zone from your Toggl profile (override with `TOGGL_TIMEZONE`). In production the host must support Gatsby Functions, such as Gatsby Cloud or Netlify.
+
+For a quick look without the site running:
+
+```sh
+yarn earnings            # this month
+yarn earnings 2026-08    # a past month
+yarn earnings --json     # raw data
+```
+
 ## Deploy your site
 
 Once your content is available in DatoCMS, deploy your site to [Gatsby Cloud](https://gatsbyjs.com/products/cloud):
