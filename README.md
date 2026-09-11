@@ -94,7 +94,7 @@ yarn earnings --json     # raw data
    chmod +x ~/Library/Application\ Support/SwiftBar/Plugins/toggl-earnings.1m.js
    ```
 
-1. Add your token. Either paste it into the `CONFIG` block at the top of the file, or set the plugin variables (`VAR_TOGGL_API_TOKEN`, `VAR_HOURLY_RATE`, `VAR_CURRENCY`) in xbar's plugin preferences or a SwiftBar `toggl-earnings.1m.js.vars.json` file. The rate defaults to 70.
+1. Add your token: copy it from Toggl Track → Profile settings → API Token, then run `pbpaste > ~/.toggl-token`. You can also paste it into the `CONFIG` block at the top of the file or set the `VAR_TOGGL_API_TOKEN` plugin variable. The rate defaults to 70.
 
 The menu bar shows the amount earned so far, with a dot while a timer is running. The dropdown lists hours, the on-pace projection, and a per-project breakdown. If it reports that `node` cannot be found, change the first line of the file to the path printed by `which node`.
 
