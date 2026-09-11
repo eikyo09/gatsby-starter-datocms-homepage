@@ -11,7 +11,9 @@ import {
 } from "../components/ui"
 import * as styles from "../components/earnings-widget.css"
 
-const REFRESH_MS = 5 * 60 * 1000
+// Toggl free plan: 30 API requests/hour, so poll gently. A running timer
+// still ticks every second on the client between polls.
+const REFRESH_MS = 10 * 60 * 1000
 
 function formatMoney(amount, currency) {
   try {

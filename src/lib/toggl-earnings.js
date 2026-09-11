@@ -130,6 +130,8 @@ async function togglGet(path, token, fetchImpl = globalThis.fetch) {
     const hint =
       res.status === 401 || res.status === 403
         ? " (check TOGGL_API_TOKEN: Toggl Track → Profile → API Token)"
+        : res.status === 402
+        ? " (Toggl hourly API quota reached; the free plan allows 30 requests per hour)"
         : res.status === 429
         ? " (Toggl rate limit; try again in a minute)"
         : ""
@@ -285,11 +287,32 @@ function round(n, places) {
 /* Orchestration                                                       */
 /* ------------------------------------------------------------------ */
 
+/*
+ * Toggl's free plan allows 30 API requests per hour per user (sliding
+ * window; HTTP 402 when exceeded). Profile and project list change rarely,
+ * so they are memoised for a day; time entries for a few minutes.
+ */
+const memo = new Map()
+const DEFAULT_TTL = { meta: 24 * 3600 * 1000, entries: 5 * 60 * 1000 }
+
+async function memoised(key, ttlMs, now, fn) {
+  const hit = memo.get(key)
+  if (hit && now.getTime() - hit.at < ttlMs) return hit.value
+  const value = await fn()
+  memo.set(key, { at: now.getTime(), value })
+  return value
+}
+
+function clearCache() {
+  memo.clear()
+}
+
 async function getMonthlyEarnings({
   env = process.env,
   month,
   now = new Date(),
   fetchImpl,
+  ttl = DEFAULT_TTL,
 } = {}) {
   const config = readConfig(env)
   if (!config.token) {
@@ -297,19 +320,26 @@ async function getMonthlyEarnings({
       "TOGGL_API_TOKEN is not set. Find it in Toggl Track → Profile settings → API Token."
     )
   }
+  const k = (name) => `${config.token}:${name}`
 
-  const me = await togglGet("/me", config.token, fetchImpl)
+  const me = await memoised(k("me"), ttl.meta, now, () =>
+    togglGet("/me", config.token, fetchImpl)
+  )
   const timeZone = config.timeZone || me.timezone || "UTC"
   const range = monthRange({ month, now, timeZone })
 
   const [projects, entries] = await Promise.all([
-    togglGet("/me/projects", config.token, fetchImpl),
-    fetchTimeEntries({
-      token: config.token,
-      start: range.start,
-      end: range.end,
-      fetchImpl,
-    }),
+    memoised(k("projects"), ttl.meta, now, () =>
+      togglGet("/me/projects", config.token, fetchImpl)
+    ),
+    memoised(k(`entries:${range.label}`), ttl.entries, now, () =>
+      fetchTimeEntries({
+        token: config.token,
+        start: range.start,
+        end: range.end,
+        fetchImpl,
+      })
+    ),
   ])
 
   const summary = summarize({
@@ -340,4 +370,5 @@ module.exports = {
   summarize,
   rateForProject,
   getMonthlyEarnings,
+  clearCache,
 }

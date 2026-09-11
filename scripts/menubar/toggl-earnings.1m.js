@@ -1,13 +1,14 @@
 #!/usr/bin/env node
 // <xbar.title>Toggl monthly earnings</xbar.title>
-// <xbar.version>v1.0</xbar.version>
+// <xbar.version>v1.1</xbar.version>
 // <xbar.author>eikyo09</xbar.author>
 // <xbar.desc>Shows this month's earnings from Toggl Track hours in the menu bar.</xbar.desc>
 // <xbar.dependencies>node</xbar.dependencies>
-// <xbar.var>string(VAR_TOGGL_API_TOKEN=""): Toggl API token (Toggl Track → Profile settings → API Token).</xbar.var>
+// <xbar.var>string(VAR_TOGGL_API_TOKEN=""): Toggl Track API token (Profile settings → API Token).</xbar.var>
 // <xbar.var>number(VAR_HOURLY_RATE=70): Hourly rate.</xbar.var>
 // <xbar.var>string(VAR_CURRENCY="USD"): ISO currency code.</xbar.var>
 // <xbar.var>string(VAR_PROJECT_RATES=""): Optional JSON of per-project rates, e.g. {"Client A": 80}.</xbar.var>
+// <xbar.var>number(VAR_API_INTERVAL_MINUTES=10): Minutes between calls to the Toggl API.</xbar.var>
 // <swiftbar.hideAbout>true</swiftbar.hideAbout>
 // <swiftbar.hideRunInTerminal>true</swiftbar.hideRunInTerminal>
 // <swiftbar.hideDisablePlugin>true</swiftbar.hideDisablePlugin>
@@ -25,19 +26,27 @@
  *      block below, or the VAR_ plugin variables in xbar preferences or a
  *      SwiftBar toggl-earnings.1m.js.vars.json file.)
  *
- * The "1m" in the file name is the refresh interval. Rename to 5m for a
- * slower refresh.
+ * Toggl's free plan allows 30 API requests per hour, so the script runs
+ * every minute but only calls Toggl every API_INTERVAL_MINUTES (default 10).
+ * Between calls it recomputes from a local cache, so a running timer still
+ * ticks up every minute. That is about 6 requests per hour, plus 2 per day
+ * for your profile and project list.
  *
  * If the menu bar shows "node not found", replace the first line with the
  * full path from `which node` (for example #!/opt/homebrew/bin/node).
  */
 
+const fs = require("fs")
+const os = require("os")
+const path = require("path")
+
 const CONFIG = {
-  token: "", // paste your Toggl API token here, or use VAR_TOGGL_API_TOKEN
+  token: "", // paste your Toggl API token here, or use ~/.toggl-token
   hourlyRate: 70,
   currency: "USD",
   projectRates: {}, // e.g. { "Client A": 80, "(no project)": 0 }
   billableOnly: false,
+  apiIntervalMinutes: 10,
 }
 
 const env = process.env
@@ -58,9 +67,19 @@ const currency = (
 const projectRates =
   parseRates(env.VAR_PROJECT_RATES || env.TOGGL_PROJECT_RATES) ||
   CONFIG.projectRates
+const apiIntervalMs =
+  Number(env.VAR_API_INTERVAL_MINUTES || CONFIG.apiIntervalMinutes) * 60000
 
 const API = "https://api.track.toggl.com/api/v9"
-let authScheme = null // remembered after the first successful request
+const CACHE_FILE = path.join(
+  os.homedir(),
+  ".cache",
+  "toggl-earnings",
+  "cache.json"
+)
+const META_TTL_MS = 24 * 3600 * 1000 // profile + project list
+const QUOTA_BACKOFF_MS = 15 * 60000 // wait after an HTTP 402
+const force = process.argv.includes("--force")
 
 main().catch((err) => {
   console.log("Toggl ✕ | color=red")
@@ -70,10 +89,12 @@ main().catch((err) => {
   )
   if (!token) {
     console.log(
-      "Set VAR_TOGGL_API_TOKEN in the plugin settings, or paste the token into CONFIG.token"
+      "Copy the API token from Toggl Track → Profile settings, then run: pbpaste > ~/.toggl-token"
     )
   }
-  console.log("Refresh | refresh=true")
+  console.log(
+    `Retry now | bash="${process.argv[1]}" param1=--force terminal=false refresh=true`
+  )
   process.exit(0)
 })
 
@@ -83,26 +104,73 @@ async function main() {
     throw new Error("Hourly rate is not a number")
 
   const now = new Date()
-  const me = await get("/me")
-  const tz = me.timezone || "UTC"
-  const { start, end, label } = monthRange(now, tz)
+  const cache = readCache()
+  let note = null
 
-  const pad = 86400000
-  const qs = new URLSearchParams({
-    start_date: new Date(start - pad).toISOString().slice(0, 10),
-    end_date: new Date(end + pad).toISOString().slice(0, 10),
-  })
-  const [projects, entries] = await Promise.all([
-    get("/me/projects"),
-    get(`/me/time_entries?${qs}`),
-  ])
+  const monthNow = monthRange(now, cache.timezone || "UTC").label
+  const needMeta =
+    !cache.timezone ||
+    !Array.isArray(cache.projects) ||
+    now - (cache.metaAt || 0) > META_TTL_MS
+  const needEntries =
+    force ||
+    !Array.isArray(cache.entries) ||
+    cache.entriesMonth !== monthNow ||
+    now - (cache.entriesAt || 0) > apiIntervalMs
+  const quotaBlocked =
+    !force && cache.quotaHitAt && now - cache.quotaHitAt < QUOTA_BACKOFF_MS
 
-  const projectById = new Map((projects || []).map((p) => [p.id, p]))
+  if ((needMeta || needEntries) && !quotaBlocked) {
+    try {
+      if (needMeta) {
+        const me = await get("/me")
+        cache.timezone = me.timezone || "UTC"
+        cache.projects = await get("/me/projects")
+        cache.metaAt = now.getTime()
+      }
+      const range = monthRange(now, cache.timezone)
+      if (needEntries || cache.entriesMonth !== range.label) {
+        const pad = 86400000
+        const qs = new URLSearchParams({
+          start_date: new Date(range.start - pad).toISOString().slice(0, 10),
+          end_date: new Date(range.end + pad).toISOString().slice(0, 10),
+        })
+        cache.entries = await get(`/me/time_entries?${qs}`)
+        cache.entriesAt = now.getTime()
+        cache.entriesMonth = range.label
+      }
+      delete cache.quotaHitAt
+    } catch (err) {
+      if (err.status === 402) {
+        cache.quotaHitAt = now.getTime()
+        note = "Toggl API hourly quota reached; showing cached data"
+      } else if (Array.isArray(cache.entries)) {
+        note = `Toggl error (${err.message}); showing cached data`
+      } else {
+        throw err
+      }
+    }
+    writeCache(cache)
+  } else if (quotaBlocked) {
+    const wait = Math.ceil(
+      (QUOTA_BACKOFF_MS - (now - cache.quotaHitAt)) / 60000
+    )
+    note = `Toggl API quota reached; next try in ${wait} min`
+  }
+
+  if (!Array.isArray(cache.entries)) throw new Error("No data from Toggl yet")
+
+  render(cache, now, note)
+}
+
+function render(cache, now, note) {
+  const { start, end, label } = monthRange(now, cache.timezone || "UTC")
+  const projectById = new Map((cache.projects || []).map((p) => [p.id, p]))
   const buckets = new Map()
   let running = null
   const clipEnd = Math.min(end, now.getTime())
 
-  for (const e of entries || []) {
+  for (const e of cache.entries) {
     if (e.server_deleted_at) continue
     if (CONFIG.billableOnly && !e.billable) continue
     const s = Date.parse(e.start)
@@ -136,7 +204,6 @@ async function main() {
     Math.min(Math.max(now.getTime() - start, 0), end - start) / (end - start)
   const projected = progress > 0 ? earnings / progress : 0
 
-  // Menu bar line
   const dot = running ? "● " : ""
   console.log(`${dot}${money(earnings)} | font=Menlo`)
   console.log("---")
@@ -164,33 +231,51 @@ async function main() {
     }
   }
   console.log("---")
+  if (note) console.log(`${note} | color=orange`)
+  const age = Math.round((now.getTime() - (cache.entriesAt || 0)) / 60000)
+  console.log(
+    `Toggl data from ${age <= 0 ? "just now" : age + " min ago"} | size=11`
+  )
   console.log("Open Toggl Track | href=https://track.toggl.com/timer")
-  console.log("Refresh | refresh=true")
+  console.log(
+    `Refresh from Toggl now | bash="${process.argv[1]}" param1=--force terminal=false refresh=true`
+  )
 }
 
-// Toggl's classic API tokens use HTTP Basic auth as "<token>:api_token".
-// Newer prefixed tokens may expect a Bearer header instead, so try both.
-async function get(path) {
-  const basic = `Basic ${Buffer.from(`${token}:api_token`).toString("base64")}`
-  const bearer = `Bearer ${token}`
-  const schemes = authScheme ? [authScheme] : [basic, bearer]
-  let last = null
-  for (const scheme of schemes) {
-    const res = await fetch(`${API}${path}`, {
-      headers: { Authorization: scheme, "Content-Type": "application/json" },
-    })
-    if (res.ok) {
-      authScheme = scheme
-      return res.json()
-    }
-    last = res
-    if (res.status !== 401 && res.status !== 403) break
+async function get(p) {
+  const auth = `Basic ${Buffer.from(`${token}:api_token`).toString("base64")}`
+  const res = await fetch(`${API}${p}`, {
+    headers: { Authorization: auth, "Content-Type": "application/json" },
+  })
+  if (!res.ok) {
+    const hint =
+      res.status === 401 || res.status === 403
+        ? " (token rejected; copy the API Token from Toggl Track → Profile settings)"
+        : res.status === 402
+        ? " (hourly API quota reached)"
+        : ""
+    const err = new Error(`Toggl ${p} returned HTTP ${res.status}${hint}`)
+    err.status = res.status
+    throw err
   }
-  const hint =
-    last.status === 401 || last.status === 403
-      ? " (token rejected; paste the current token from Toggl Track → Profile settings → API Token)"
-      : ""
-  throw new Error(`Toggl ${path} returned HTTP ${last.status}${hint}`)
+  return res.json()
+}
+
+function readCache() {
+  try {
+    return JSON.parse(fs.readFileSync(CACHE_FILE, "utf8")) || {}
+  } catch {
+    return {}
+  }
+}
+
+function writeCache(cache) {
+  try {
+    fs.mkdirSync(path.dirname(CACHE_FILE), { recursive: true })
+    fs.writeFileSync(CACHE_FILE, JSON.stringify(cache))
+  } catch {
+    // read-only home? keep going with in-memory data
+  }
 }
 
 function rateFor(project) {
@@ -213,9 +298,6 @@ function rateFor(project) {
 //   pbpaste > ~/.toggl-token
 function readTokenFile() {
   try {
-    const fs = require("fs")
-    const path = require("path")
-    const os = require("os")
     return fs
       .readFileSync(path.join(os.homedir(), ".toggl-token"), "utf8")
       .trim()
@@ -269,11 +351,7 @@ function monthRange(now, timeZone) {
       : zonedMonthStart(year, month + 1, timeZone)
   const label = new Date(Date.UTC(year, month - 1, 1)).toLocaleDateString(
     "en-US",
-    {
-      month: "long",
-      year: "numeric",
-      timeZone: "UTC",
-    }
+    { month: "long", year: "numeric", timeZone: "UTC" }
   )
   return { start, end, label }
 }

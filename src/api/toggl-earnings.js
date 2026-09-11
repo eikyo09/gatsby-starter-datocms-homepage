@@ -25,6 +25,8 @@ module.exports = async function handler(req, res) {
       ? 503
       : /HTTP 401|HTTP 403/.test(message)
       ? 502
+      : /HTTP 402/.test(message)
+      ? 429
       : /month must look like|invalid month/.test(message)
       ? 400
       : 500

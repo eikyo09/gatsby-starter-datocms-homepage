@@ -98,6 +98,10 @@ yarn earnings --json     # raw data
 
 The menu bar shows the amount earned so far, with a dot while a timer is running. The dropdown lists hours, the on-pace projection, and a per-project breakdown. If it reports that `node` cannot be found, change the first line of the file to the path printed by `which node`.
 
+**API quota.** Toggl Track's free plan allows 30 API requests per hour per user, and answers with HTTP 402 above that. The plugin runs every minute but only calls Toggl every 10 minutes (about 6 requests per hour, plus 2 per day for your profile and projects), recomputing from a local cache in between so a running timer still ticks up. The website's function caches the same way and the page polls every 10 minutes. Use "Refresh from Toggl now" in the dropdown to force a call; after a 402 the plugin shows cached data and waits 15 minutes before trying again.
+
+**Which token.** Use the API Token at the bottom of Toggl Track → Profile settings, a 32-character string. Keys from the newer Toggl 2.0 app (starting with `toggl_sk_`) belong to a different API and will not work here.
+
 ## Deploy your site
 
 Once your content is available in DatoCMS, deploy your site to [Gatsby Cloud](https://gatsbyjs.com/products/cloud):
