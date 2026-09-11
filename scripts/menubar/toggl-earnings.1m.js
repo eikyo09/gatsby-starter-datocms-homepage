@@ -165,20 +165,30 @@ async function main() {
   console.log("Refresh | refresh=true")
 }
 
+// Toggl's classic API tokens use HTTP Basic auth as "<token>:api_token".
+// Newer prefixed tokens may expect a Bearer header instead, so try both.
+let authScheme = null
 async function get(path) {
-  const auth = Buffer.from(`${token}:api_token`).toString("base64")
-  const res = await fetch(`${API}${path}`, {
-    headers: {
-      Authorization: `Basic ${auth}`,
-      "Content-Type": "application/json",
-    },
-  })
-  if (!res.ok) {
-    const hint =
-      res.status === 401 || res.status === 403 ? " (check your API token)" : ""
-    throw new Error(`Toggl ${path} returned HTTP ${res.status}${hint}`)
+  const basic = `Basic ${Buffer.from(`${token}:api_token`).toString("base64")}`
+  const bearer = `Bearer ${token}`
+  const schemes = authScheme ? [authScheme] : [basic, bearer]
+  let last = null
+  for (const scheme of schemes) {
+    const res = await fetch(`${API}${path}`, {
+      headers: { Authorization: scheme, "Content-Type": "application/json" },
+    })
+    if (res.ok) {
+      authScheme = scheme
+      return res.json()
+    }
+    last = res
+    if (res.status !== 401 && res.status !== 403) break
   }
-  return res.json()
+  const hint =
+    last.status === 401 || last.status === 403
+      ? " (token rejected; paste the current token from Toggl Track → Profile settings → API Token)"
+      : ""
+  throw new Error(`Toggl ${path} returned HTTP ${last.status}${hint}`)
 }
 
 function rateFor(project) {
