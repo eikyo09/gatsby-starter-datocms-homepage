@@ -64,7 +64,7 @@ The `/earnings` page shows how much you have earned so far this month from the h
 
    ```sh
    TOGGL_API_TOKEN=your-token
-   TOGGL_HOURLY_RATE=50
+   TOGGL_HOURLY_RATE=70
    TOGGL_CURRENCY=USD
    # optional per-project rates, keyed by project name or id
    TOGGL_PROJECT_RATES={"Client A": 80, "Client B": 65}
@@ -81,6 +81,22 @@ yarn earnings            # this month
 yarn earnings 2026-08    # a past month
 yarn earnings --json     # raw data
 ```
+
+### Show it in the macOS menu bar
+
+`scripts/menubar/toggl-earnings.1m.js` is a plugin for [SwiftBar](https://swiftbar.app) or [xbar](https://xbarapp.com) that puts this month's earnings in the menu bar and refreshes every minute. It is self-contained and does not need the site running.
+
+1. Install SwiftBar (`brew install --cask swiftbar`) or xbar and pick a plugin folder.
+1. Copy the plugin there and make it executable:
+
+   ```sh
+   cp scripts/menubar/toggl-earnings.1m.js ~/Library/Application\ Support/SwiftBar/Plugins/
+   chmod +x ~/Library/Application\ Support/SwiftBar/Plugins/toggl-earnings.1m.js
+   ```
+
+1. Add your token. Either paste it into the `CONFIG` block at the top of the file, or set the plugin variables (`VAR_TOGGL_API_TOKEN`, `VAR_HOURLY_RATE`, `VAR_CURRENCY`) in xbar's plugin preferences or a SwiftBar `toggl-earnings.1m.js.vars.json` file. The rate defaults to 70.
+
+The menu bar shows the amount earned so far, with a dot while a timer is running. The dropdown lists hours, the on-pace projection, and a per-project breakdown. If it reports that `node` cannot be found, change the first line of the file to the path printed by `which node`.
 
 ## Deploy your site
 
