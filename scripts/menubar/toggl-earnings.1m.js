@@ -20,9 +20,10 @@
  *   1. Install SwiftBar (brew install --cask swiftbar) or xbar.
  *   2. Copy this file into the plugin folder and make it executable:
  *        chmod +x toggl-earnings.1m.js
- *   3. Set your token and rate, either in the CONFIG block below or in the
- *      plugin's variables (xbar: right-click the plugin → Preferences;
- *      SwiftBar: a toggl-earnings.1m.js.vars.json file next to the plugin).
+ *   3. Set your token: copy it from Toggl Track → Profile settings → API
+ *      Token, then run `pbpaste > ~/.toggl-token`. (Alternatives: the CONFIG
+ *      block below, or the VAR_ plugin variables in xbar preferences or a
+ *      SwiftBar toggl-earnings.1m.js.vars.json file.)
  *
  * The "1m" in the file name is the refresh interval. Rename to 5m for a
  * slower refresh.
@@ -43,6 +44,7 @@ const env = process.env
 const token = (
   env.VAR_TOGGL_API_TOKEN ||
   env.TOGGL_API_TOKEN ||
+  readTokenFile() ||
   CONFIG.token
 ).trim()
 const hourlyRate = Number(
@@ -204,6 +206,22 @@ function rateFor(project) {
     return lower["(no project)"]
   }
   return hourlyRate
+}
+
+// Optional: keep the token in ~/.toggl-token (one line) so the plugin file
+// can be replaced without losing it. Copy the token, then run:
+//   pbpaste > ~/.toggl-token
+function readTokenFile() {
+  try {
+    const fs = require("fs")
+    const path = require("path")
+    const os = require("os")
+    return fs
+      .readFileSync(path.join(os.homedir(), ".toggl-token"), "utf8")
+      .trim()
+  } catch {
+    return ""
+  }
 }
 
 function parseRates(raw) {
