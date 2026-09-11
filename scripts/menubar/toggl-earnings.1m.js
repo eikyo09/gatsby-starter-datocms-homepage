@@ -58,6 +58,7 @@ const projectRates =
   CONFIG.projectRates
 
 const API = "https://api.track.toggl.com/api/v9"
+let authScheme = null // remembered after the first successful request
 
 main().catch((err) => {
   console.log("Toggl ✕ | color=red")
@@ -167,7 +168,6 @@ async function main() {
 
 // Toggl's classic API tokens use HTTP Basic auth as "<token>:api_token".
 // Newer prefixed tokens may expect a Bearer header instead, so try both.
-let authScheme = null
 async function get(path) {
   const basic = `Basic ${Buffer.from(`${token}:api_token`).toString("base64")}`
   const bearer = `Bearer ${token}`
